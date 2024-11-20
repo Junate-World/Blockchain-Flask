@@ -53,41 +53,60 @@ class Blockchain:
 
     def resolve_conflicts(self):
         """
-        Consensus Algorithm: Resolves conflicts by replacing our chain with the longest valid one in the network.
+        Consensus Algorithm:
+        Ensures all nodes synchronize their chains by merging blocks with unique proofs.
+        No duplication occurs.
         """
         neighbours = self.nodes
-        new_chain = None
-        max_length = len(self.chain)  # Start with the current chain length
+        new_blocks = []  # Store new blocks from other nodes
+        known_proofs = {block['proof'] for block in self.chain}  # Track existing proofs in the local chain
 
         for node in neighbours:
-            try:
-                response = requests.get(f"http://{node}/chain")
-                if response.status_code == 200:
-                    length = response.json().get("length")
-                    chain = response.json().get("chain")
+            response = requests.get(f"http://{node}/chain")
 
-                    # Check if the fetched chain is longer and valid
-                    if length > max_length and self.valid_chain(chain):
-                        max_length = length
-                        new_chain = chain
+            if response.status_code == 200:
+                remote_chain = response.json()["chain"]
 
-            except requests.exceptions.RequestException as e:
-                print(f"Error communicating with node {node}: {e}")
-                continue
+                for block in remote_chain:
+                    # Check if the block's proof is unique
+                    if block['proof'] not in known_proofs:
+                        # Add the new block to the list of blocks to merge
+                        new_blocks.append(block)
+                        known_proofs.add(block['proof'])  # Avoid processing the same block again
 
-        # Replace our chain if we discovered a new, valid chain longer than ours
-        if new_chain:
-            self.chain = new_chain
-            return True  # Chain was replaced
+        # Merge the new blocks into the local chain, maintaining order by proof
+        if new_blocks:
+            self.chain.extend(new_blocks)
+            # Sort the chain by proof to ensure proper structure
+            self.chain.sort(key=lambda x: x['proof'])
 
-        return False  # Chain remains authoritative
-    def calculate_proof_cumulative(self, chain):
+            print(f"Merged {len(new_blocks)} new blocks from other nodes")
+            return True
+
+        print("No new blocks to merge")
+        return False
+
+    def valid_block(self, block):
         """
-        Calculate the cumulative proof of the entire chain.
-        A measure of the computational work put into the chain.
+        Validates an individual block's structure and content.
         """
-        return sum(block["proof"] for block in chain if "proof" in block)
+        # Ensure required fields are present
+        required_keys = {"index", "timestamp", "transactions", "proof", "previous_hash", "nonce"}
+        if not all(key in block for key in required_keys):
+            return False
 
+        # Verify the hash integrity (previous hash matches the hash of the previous block)
+        if block["index"] > 1:  # Skip genesis block
+            previous_block = self.chain[block["index"] - 2]
+            if block["previous_hash"] != self.hash(previous_block):
+                return False
+
+        # Verify proof of work (use the previous block's proof and the current block's proof and nonce)
+        last_proof = self.chain[block["index"] - 2]["proof"] if block["index"] > 1 else 100  # Genesis block has no previous proof
+        if not self.valid_proof(last_proof, block["proof"], block["nonce"]):
+            return False
+
+        return True
 
     def new_block(self, proof, previous_hash=None, nonce=None):
         """

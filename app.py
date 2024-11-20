@@ -11,18 +11,19 @@ node_identifier = str(uuid4()).replace("-", "")
 # Instantiate the Blockchain
 blockchain = Blockchain()
 
+# Add a unique identifier for each node when generating the nonce
 @app.route('/mine', methods=['GET'])
 def mine():
     last_proof = blockchain.last_block["proof"]
-    nonce = uuid4().hex  # Generate a random nonce
+    nonce = int(uuid4().int)  # A unique starting point for each node
     proof = None
-    increment = 0  # Start a counter for proof attempts
+    increment = 1  # Increment the nonce
 
     while not proof:
-        candidate_proof = last_proof + increment
+        candidate_proof = last_proof + nonce  # Incorporate unique nonce
         if blockchain.valid_proof(last_proof, candidate_proof, nonce):
             proof = candidate_proof
-        increment += 1
+        nonce += increment  # Increment nonce
 
     blockchain.new_transaction(sender="0", recipient=node_identifier, amount=1)
     previous_hash = blockchain.hash(blockchain.last_block)
